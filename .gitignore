@@ -1,0 +1,8 @@
+.env
+.development.env
+.DS_Store
+.claude/
+node_modules/
+*.key
+*.pem
+*.pub
