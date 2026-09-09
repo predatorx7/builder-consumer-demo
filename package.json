@@ -10,7 +10,7 @@
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@reclaimprotocol/client": "file:../../builder/packages/client",
+		"@reclaimprotocol/client": "file:../builder/packages/client",
 		"express": "^5.1.0"
 	},
 	"devDependencies": {
