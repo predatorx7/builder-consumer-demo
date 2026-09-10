@@ -6,3 +6,6 @@ node_modules/
 *.key
 *.pem
 *.pub
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

@@ -1,178 +1,86 @@
-# Run a Builder v2 consumer demo
+# Run the Builder consumer demo
 
-This demo creates a Builder session, prints the claimant's `api=2` URL,
-receives one signed callback, and verifies the result before it prints trusted
-claim data. It never sends a Verification Client UUID or private key to the
-claimant.
+This Fastify server shows the production integration shape:
 
-It works with Builder's built-in Verification Client or any registered
-Builder-compatible client, including the portal and mobile clients.
+1. Your backend creates a Builder verification.
+2. Your frontend opens the returned `verificationUrl`.
+3. Builder sends the signed result to your callback.
+4. Your backend verifies the result with `@reclaimprotocol/client` and stores
+   only the verified payload.
 
-```mermaid
-sequenceDiagram
-	actor Consumer
-	actor Claimant
-	participant Builder
-	participant VC as Verification Client
-	participant Callback as Consumer callback
+The demo stores sessions and verified results in SQLite. Fastify writes
+structured HTTP logs with Pino. It doesn't log callback bodies, proofs, or
+claimant data.
 
-	Consumer->>Builder: Create session with OrgToken
-	Builder-->>Consumer: verificationUrl with api=2
-	Consumer->>Claimant: Open verificationUrl
-	Claimant->>VC: Complete verification
-	VC->>Builder: Signed result containing legacy Proof objects
-	Builder->>Callback: Deliver result
-	Callback->>Callback: results.receive verifies the result and each proof
-```
+## Configure the server
 
-## What the demo verifies
-
-`reclaim.results.receive` performs the complete server-side verification path:
-
-1. Decrypts the callback with the organization's Ethereum private key when
-   result encryption is enabled.
-2. Resolves the session's registered Verification Client issuer and trusted
-   JSON Web Key Set (JWKS) URL.
-3. Verifies the outer ES256K JSON Web Signature (JWS), session ID, organization
-   audience, and expiry.
-4. Runs the package's legacy-compatible `verifyProof` for every exact proof.
-5. Checks trusted attestors, proof signatures, and provider/request hashes
-   against the immutable Builder recipes.
-6. Optionally verifies the legacy-compatible TEE nonce and session binding.
-
-Use only `proof.data` returned after this call for application decisions. Outer
-`extracted_parameters` fields are diagnostics, not trusted claim data. If
-`results.receive` throws `ResultVerificationError`, the demo exits with a
-failure and does not use the callback payload.
-
-## Configure the demo
-
-Copy the example environment file and replace its placeholders:
-
-```bash
-cp .env.example .env
-```
-
-Set the required values:
-
-| Variable | Purpose |
-| --- | --- |
-| `RECLAIM_ORG_SECRET` | Organization secret (`rorg_…`) used as the Builder OrgToken. Keep it server-side. |
-| `ORG_ID` | Expected result audience and organization addressed by setup. |
-| `PROVIDER_ID` | One provider UUID or a comma-separated ordered list. |
-| `BUILDER_API_URL` | Builder origin. Defaults to `http://localhost:4001`. |
-| `CALLBACK_URL` | Callback registered on the organization. It must be reachable by Builder. |
-
-`PROVIDER_VERSION` can be blank, exact, or an npm semantic-version range:
-
-| Value | Builder resolution |
-| --- | --- |
-| Blank | Latest active trunk version. |
-| `1.2.3` | Exact active version. |
-| `^1.2.0` | Highest active version satisfying the range. |
-
-### Select a Verification Client
-
-Leave `VERIFICATION_CLIENT_URL` blank to use Builder's built-in client. To use
-the portal, verifier app, or another client, set it to that client's exact
-registered base URL:
+Create `.env`:
 
 ```dotenv
-VERIFICATION_CLIENT_URL=https://portal.example.com/
+RECLAIM_ORG_SECRET=rorg_replace_me
+ORG_ID=00000000-0000-0000-0000-000000000000
+PROVIDER_ID=00000000-0000-0000-0000-000000000000
+CONSUMER_API_KEY=replace_with_a_random_server_api_key
+PUBLIC_URL=https://consumer.example.com
 ```
 
-Builder resolves that URL to a registered Verification Client UUID and returns
-a URL containing the session ID and `api=2`. The consumer never sends a
-Verification Client UUID.
+`PUBLIC_URL` must be reachable by Builder. The server registers
+`PUBLIC_URL/callbacks/reclaim` as the callback when it starts.
 
-Client-owned redirect values can be appended after session creation:
+The following variables are optional:
 
-```dotenv
-VERIFICATION_CLIENT_QUERY=redirectUrl=https%3A%2F%2Fmerchant.example%2Fdone
-```
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BUILDER_API_URL` | `https://build.reclaimprotocol.org` | Builder deployment to use. |
+| `VERIFICATION_CLIENT` | `builder` | Registered client name from `VERIFICATION_CLIENT_URLS`. |
+| `PROVIDER_VERSION` | Latest active version | Exact version or semantic-version range. |
+| `RECLAIM_ETH_PRIVATE_KEY` | None | Decrypt results when organization callback encryption is enabled. |
+| `PORT` | `3000` | HTTP port. |
+| `DATABASE_PATH` | `consumer-demo.sqlite` | SQLite database path. |
+| `LOG_LEVEL` | `info` | Pino log level. |
 
-The demo rejects attempts to override Builder-owned `api` or `sessionId`
-parameters. Query parameter names are client-specific; Builder does not store,
-validate, or execute redirects.
+For staging or local Builder, set `BUILDER_API_URL`. The SDK derives the same
+complete Verification Client URL map that Builder registers for that origin.
 
-### Optional callback encryption
-
-To encrypt signed results to the organization:
-
-```dotenv
-CAN_USE_ENCRYPTION=true
-RECLAIM_ETH_PRIVATE_KEY=0x<64-hex-character-private-key>
-```
-
-Setup derives and registers only the public secp256k1 key. The private key
-stays in the consumer process and decrypts callback data locally. With
-`CAN_USE_ENCRYPTION=false`, setup disables result encryption and callbacks
-contain a plaintext—but still signed—JWS.
-
-### Optional TEE session binding
-
-For a TEE-capable Verification Client, enable the legacy-compatible session
-nonce:
-
-```dotenv
-CAN_BIND_TEE=true
-RECLAIM_ETH_PRIVATE_KEY=0x<organization-verification-private-key>
-```
-
-The client package creates the session first, derives and signs the nonce
-locally, and binds it through Builder. The private key is not sent to Builder.
-The callback verifier uses the same key to validate the proof's TEE binding.
-
-## Create, launch, receive, and verify
-
-Install dependencies, configure the organization, and type-check the demo:
+## Start the server
 
 ```bash
 npm install
 npm run check
-npm run setup
-```
-
-Setup:
-
-- registers or updates the organization's public key when one is configured;
-- sets callback encryption to the requested state; and
-- creates the signed-result callback subscription if an identical one doesn't
-  already exist.
-
-The subscription includes `verification_success`, `verification_rejected`, and
-`verification_error`. Cancellation and expiry are useful operational events,
-but they do not contain a signed proof result.
-
-Start the listener and create a Builder session:
-
-```bash
 npm start
 ```
 
-Open the printed URL as the claimant and complete verification. The process
-waits for the callback, runs `results.receive`, and prints verified proof
-metadata and trusted data. The flow stops on a failed callback verification;
-do not retry it by treating the Builder link as a legacy request.
+Create a verification:
 
-For a local Builder, use `http://localhost:4010/callback`. When using a remote
-Builder deployment, set `CALLBACK_URL` to an HTTPS endpoint or tunnel that can
-reach this process. The local Express listener uses the path from
-`CALLBACK_URL`, so a public URL ending in `/reclaim/callback` listens locally
-on that same path.
+```bash
+curl -X POST http://localhost:3000/verifications \
+  -H 'authorization: Bearer replace_with_a_random_server_api_key' \
+  -H 'content-type: application/json' \
+  -d '{"context":{"orderId":"order-123"}}'
+```
 
-## Production differences
+Open the returned `verificationUrl`. After Builder delivers and the server
+verifies the callback, read the verification status and verified proof data:
 
-The callback in this demo stores one delivery in memory. A production handler
-should:
+```bash
+curl http://localhost:3000/verifications/SESSION_ID \
+  -H 'authorization: Bearer replace_with_a_random_server_api_key'
+```
 
-- acknowledge quickly after durably storing the delivery;
-- handle at-least-once delivery and deduplicate by session and event;
-- run `results.receive` on a trusted server, never in claimant-facing code;
-- provide the expected session ID and organization audience explicitly;
-- keep organization private keys in a secret manager or signing service; and
-- avoid logging proof contents or claimant personal data.
+## Test with a Cloudflare quick tunnel
 
-Never commit `.env`, private keys, or callback payloads. The included
-`.gitignore` excludes common local key files.
-# builder-consumer-demo
+Start the server on port 3000, then expose it:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+Set `PUBLIC_URL` to the generated HTTPS origin and restart the server. For a
+local Builder, also set `BUILDER_API_URL=http://localhost:4001`.
+
+The authenticated status endpoint returns the stored result and proof data when
+verification is complete. The `sessionId`, `event`, and `timestamp` callback
+fields are routing hints. The server trusts and stores only data returned by
+`results.receive`, which verifies the Builder signature, expected organization,
+expected session, and each proof. Keep the organization secret and consumer API
+key on the server.
