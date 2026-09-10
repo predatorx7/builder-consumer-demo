@@ -9,6 +9,8 @@ This demo contains the essential server-side integration:
 
 Fastify stores sessions and verified results in memory. Restarting the process
 clears them. Pino logs HTTP requests and errors without logging proof contents.
+The demo endpoints are intentionally unauthenticated; use your application's
+normal authentication before exposing equivalent endpoints in production.
 
 ## Configure providers
 
@@ -35,12 +37,12 @@ Create `.env`:
 ```dotenv
 RECLAIM_ORG_SECRET=rorg_replace_me
 ORG_ID=00000000-0000-0000-0000-000000000000
-CONSUMER_API_KEY=replace_with_a_random_server_api_key
-BUILDER_API_URL=https://build.reclaimprotocol.org
-VERIFICATION_CLIENT=builder
 ```
 
-Set `RECLAIM_ETH_PRIVATE_KEY` if the organization encrypts callback results.
+Optionally set `RECLAIM_ETH_PRIVATE_KEY` to the organization's Ethereum private
+key. The SDK keeps it on this server and uses it to bind the session to the app,
+verify the proof's TEE binding, and decrypt callback results when organization
+encryption is enabled.
 
 Builder requires a callback subscription before it creates a verification.
 Configure the subscription separately with this callback URL:
@@ -66,17 +68,15 @@ Create a verification:
 
 ```bash
 curl -X POST http://localhost:3000/verifications \
-  -H 'authorization: Bearer replace_with_a_random_server_api_key' \
   -H 'content-type: application/json' \
   -d '{"context":{"orderId":"order-123"}}'
 ```
 
-Open the returned `verificationUrl`. After the callback arrives, read the
-verified result and proof data:
+Open the returned `verificationUrl`. Save its `reclaimSessionId`. After the
+callback arrives, read the verified result and proof data:
 
 ```bash
-curl http://localhost:3000/verifications/SESSION_ID \
-  -H 'authorization: Bearer replace_with_a_random_server_api_key'
+curl http://localhost:3000/verifications/RECLAIM_SESSION_ID
 ```
 
 The callback's `sessionId`, `event`, and `timestamp` fields are routing hints.

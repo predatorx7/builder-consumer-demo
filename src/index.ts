@@ -1,35 +1,20 @@
 import assert from 'node:assert'
-import { timingSafeEqual } from 'node:crypto'
 import {
-	createReclaim,
-	type KnownVerificationClientName,
+	ReclaimVerification,
 	type VerificationResultDelivery,
 	type VerifyResultFullOutcome,
-	verificationClientUrls,
+	VerificationClient,
 } from '@reclaimprotocol/client'
 import Fastify from 'fastify'
-import type { FastifyReply, FastifyRequest } from 'fastify'
 import pino from 'pino'
 import providerConfig from '../providers.json' with { type: 'json' }
 
 const PORT = 3000
-const BUILDER_API_URL = requiredEnv('BUILDER_API_URL')
 const ORG_SECRET = requiredEnv('RECLAIM_ORG_SECRET')
 const ORG_ID = requiredEnv('ORG_ID')
-const CONSUMER_API_KEY = requiredEnv('CONSUMER_API_KEY')
-const RESULT_DECRYPTION_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
-const urls = verificationClientUrls(BUILDER_API_URL)
-const verificationClientName = requiredEnv('VERIFICATION_CLIENT')
+const ORG_ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
 
-assert(
-	isKnownVerificationClient(verificationClientName),
-	`VERIFICATION_CLIENT must be one of: ${Object.keys(urls).join(', ')}`,
-)
-
-const reclaim = createReclaim({
-	baseUrl: BUILDER_API_URL,
-	orgSecret: ORG_SECRET,
-})
+const reclaim = ReclaimVerification.create({ orgSecret: ORG_SECRET })
 const sessions = new Set<string>()
 const results = new Map<string, VerifyResultFullOutcome>()
 
@@ -39,7 +24,6 @@ const logger = pino({
 const app = Fastify({ loggerInstance: logger })
 
 app.post<{ Body: CreateVerificationBody }>('/verifications', {
-	preHandler: authenticateConsumer,
 	schema: {
 		body: {
 			type: 'object',
@@ -57,12 +41,18 @@ app.post<{ Body: CreateVerificationBody }>('/verifications', {
 	const session = await reclaim.sessions.create({
 		providers: providerConfig.providers,
 		context: request.body.context || {},
-		verificationClientUrl: urls[verificationClientName],
+		verificationClientUrl: VerificationClient.builder,
+		...(ORG_ETH_PRIVATE_KEY
+			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
+			: {}),
 	})
 	sessions.add(session.id)
-	request.log.info({ sessionId: session.id }, 'verification created')
+	request.log.info(
+		{ reclaimSessionId: session.id },
+		'verification created',
+	)
 	return reply.code(201).send({
-		sessionId: session.id,
+		reclaimSessionId: session.id,
 		verificationUrl: session.verificationUrl,
 	})
 })
@@ -88,32 +78,37 @@ app.post<{ Body: VerificationResultDelivery }>('/callbacks/reclaim', {
 	}
 
 	const delivery = await reclaim.results.receive(request.body, {
-		credential: RESULT_DECRYPTION_KEY,
 		expectedAud: ORG_ID,
-		expectedReclaimSessionId: sessionId,
+		reclaimSessionId: sessionId,
+		...(ORG_ETH_PRIVATE_KEY
+			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
+			: {}),
 	})
 	assert(delivery.kind === 'result', 'Expected a signed terminal result')
 	results.set(sessionId, delivery.result)
-	request.log.info({ sessionId }, 'verification result accepted')
+	request.log.info(
+		{ reclaimSessionId: sessionId },
+		'verification result accepted',
+	)
 	return reply.code(204).send()
 })
 
-app.get<{ Params: { sessionId: string } }>(
-	'/verifications/:sessionId',
-	{ preHandler: authenticateConsumer },
+app.get<{ Params: { reclaimSessionId: string } }>(
+	'/verifications/:reclaimSessionId',
 	async(request, reply) => {
-		if(!sessions.has(request.params.sessionId)) {
+		const { reclaimSessionId } = request.params
+		if(!sessions.has(reclaimSessionId)) {
 			return reply.code(404).send({ error: 'Verification session not found' })
 		}
-		const result = results.get(request.params.sessionId)
+		const result = results.get(reclaimSessionId)
 		if(!result) {
 			return {
-				sessionId: request.params.sessionId,
+				reclaimSessionId,
 				status: 'pending',
 			}
 		}
 		return {
-			sessionId: request.params.sessionId,
+			reclaimSessionId,
 			status: 'complete',
 			result,
 		}
@@ -133,26 +128,6 @@ function requiredEnv(name: string) {
 	const value = process.env[name]?.trim()
 	assert(value, `${name} is required`)
 	return value
-}
-
-function isKnownVerificationClient(
-	name: string,
-): name is KnownVerificationClientName {
-	return Object.hasOwn(urls, name)
-}
-
-async function authenticateConsumer(
-	request: FastifyRequest,
-	reply: FastifyReply,
-) {
-	const supplied = Buffer.from(request.headers.authorization || '')
-	const expected = Buffer.from(`Bearer ${CONSUMER_API_KEY}`)
-	if(
-		supplied.length !== expected.length
-		|| !timingSafeEqual(supplied, expected)
-	) {
-		return reply.code(401).send({ error: 'Unauthorized' })
-	}
 }
 
 async function shutdown(signal: string) {
