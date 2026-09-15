@@ -11,10 +11,19 @@ import providerConfig from '../providers.json' with { type: 'json' }
 
 const PORT = 3000
 const ORG_SECRET = requiredEnv('RECLAIM_ORG_SECRET')
+
+// Best practise: Use this for result validation
 const ORG_ID = requiredEnv('ORG_ID')
+
+// Optional, only needed if you want to do tee attestation OR decrypt result if you
+// have encryption enabled for your organization
 const ORG_ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
 
-const reclaim = ReclaimVerification.create({ orgSecret: ORG_SECRET })
+const reclaim = ReclaimVerification.create({ 
+	orgSecret: ORG_SECRET,
+	baseUrl: 'http://localhost:4001'
+});
+
 const sessions = new Set<string>()
 const results = new Map<string, VerifyResultFullOutcome>()
 
@@ -41,7 +50,7 @@ app.post<{ Body: CreateVerificationBody }>('/verifications', {
 	const session = await reclaim.sessions.create({
 		providers: providerConfig.providers,
 		context: request.body.context || {},
-		verificationClientUrl: VerificationClient.builder,
+		verificationClientUrl: VerificationClient.custom('http://localhost:4001/verifier-app'),
 		...(ORG_ETH_PRIVATE_KEY
 			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
 			: {}),
