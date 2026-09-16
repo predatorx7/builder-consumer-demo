@@ -19,7 +19,7 @@ const ORG_ID = requiredEnv('ORG_ID')
 // have encryption enabled for your organization
 const ORG_ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
 
-const reclaim = ReclaimVerification.create({ 
+const reclaim = ReclaimVerification.create({
 	orgSecret: ORG_SECRET,
 });
 
@@ -45,7 +45,7 @@ app.post<{ Body: CreateVerificationBody }>('/verifications', {
 			},
 		},
 	},
-}, async(request, reply) => {
+}, async (request, reply) => {
 	const session = await reclaim.sessions.create({
 		providers: providerConfig.providers,
 		context: request.body.context || {},
@@ -81,9 +81,9 @@ app.post<{ Body: VerificationResultDelivery }>('/callbacks/reclaim', {
 			},
 		},
 	},
-}, async(request, reply) => {
+}, async (request, reply) => {
 	const { sessionId } = request.body
-	if(!sessions.has(sessionId)) {
+	if (!sessions.has(sessionId)) {
 		return reply.code(404).send({ error: 'Unknown verification session' })
 	}
 
@@ -105,13 +105,13 @@ app.post<{ Body: VerificationResultDelivery }>('/callbacks/reclaim', {
 
 app.get<{ Params: { reclaimSessionId: string } }>(
 	'/verifications/:reclaimSessionId',
-	async(request, reply) => {
+	async (request, reply) => {
 		const { reclaimSessionId } = request.params
-		if(!sessions.has(reclaimSessionId)) {
+		if (!sessions.has(reclaimSessionId)) {
 			return reply.code(404).send({ error: 'Verification session not found' })
 		}
 		const result = results.get(reclaimSessionId)
-		if(!result) {
+		if (!result) {
 			return {
 				reclaimSessionId,
 				status: 'pending',
@@ -126,7 +126,7 @@ app.get<{ Params: { reclaimSessionId: string } }>(
 )
 
 await app.listen({ host: '0.0.0.0', port: PORT })
-for(const signal of ['SIGINT', 'SIGTERM'] as const) {
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	process.once(signal, () => void shutdown(signal))
 }
 
