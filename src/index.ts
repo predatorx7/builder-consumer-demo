@@ -21,7 +21,6 @@ const ORG_ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
 
 const reclaim = ReclaimVerification.create({ 
 	orgSecret: ORG_SECRET,
-	baseUrl: 'http://localhost:4001'
 });
 
 const sessions = new Set<string>()
@@ -50,7 +49,9 @@ app.post<{ Body: CreateVerificationBody }>('/verifications', {
 	const session = await reclaim.sessions.create({
 		providers: providerConfig.providers,
 		context: request.body.context || {},
-		verificationClientUrl: VerificationClient.custom('http://localhost:4001/verifier-app'),
+		// Portals is the default verification client, you can always change it using verificationClientUrl
+		// or use a custom one.
+		// verificationClientUrl: VerificationClient.custom('http://localhost:4001/verifier-app'),
 		...(ORG_ETH_PRIVATE_KEY
 			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
 			: {}),
