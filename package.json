@@ -3,18 +3,21 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Example consumer that requests a verification, prints the URL, and shows the decrypted+verified result.",
+	"description": "Minimal Fastify server that creates Builder verifications and stores verified results.",
 	"scripts": {
 		"start": "node --env-file-if-exists=.env --experimental-strip-types src/index.ts",
-		"setup": "node --env-file-if-exists=.env --experimental-strip-types src/setup.ts",
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@reclaimprotocol/client": "file:../../builder/packages/client",
-		"express": "^5.1.0"
+		"@reclaimprotocol/client": "file:../builder/packages/client",
+		"fastify": "^5.6.0",
+		"pino": "^10.3.0"
 	},
 	"devDependencies": {
-		"@types/express": "^5.0.0",
+		"@types/node": "^24.13.4",
 		"typescript": "^5.9.0"
+	},
+	"engines": {
+		"node": ">=22.13.0"
 	}
 }

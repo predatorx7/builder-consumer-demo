@@ -1,194 +1,146 @@
 import assert from 'node:assert'
-import { once } from 'node:events'
 import {
-	type CallbackBody,
-	createReclaim,
-	ResultVerificationError,
+	ReclaimVerification,
+	type VerificationResultDelivery,
+	type VerifyResultFullOutcome,
+	VerificationClient,
 } from '@reclaimprotocol/client'
-import express from 'express'
+import Fastify from 'fastify'
+import pino from 'pino'
+import providerConfig from '../providers.json' with { type: 'json' }
 
-const BUILDER_API_URL = process.env.BUILDER_API_URL || 'http://localhost:4001'
-const CALLBACK_PORT = +(process.env.CALLBACK_PORT || 4010)
-const CALLBACK_PATH = callbackPath(process.env.CALLBACK_URL)
+const PORT = 3000
 const ORG_SECRET = requiredEnv('RECLAIM_ORG_SECRET')
+
+// Best practise: Use this for result validation
 const ORG_ID = requiredEnv('ORG_ID')
-const PROVIDER_IDS = requiredEnv('PROVIDER_ID')
-	.split(',')
-	.map((id) => id.trim())
-	.filter(Boolean)
-const PROVIDER_VERSION = process.env.PROVIDER_VERSION?.trim()
-const VERIFICATION_CLIENT_URL = process.env.VERIFICATION_CLIENT_URL?.trim()
-const VERIFICATION_CLIENT_QUERY = process.env.VERIFICATION_CLIENT_QUERY?.trim()
-const ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
-const canUseEncryption = process.env.CAN_USE_ENCRYPTION === 'true'
-const canBindTee = process.env.CAN_BIND_TEE === 'true'
 
-assert(PROVIDER_IDS.length, 'PROVIDER_ID must contain at least one provider UUID')
-assert(
-	!canUseEncryption || ETH_PRIVATE_KEY,
-	'RECLAIM_ETH_PRIVATE_KEY is required when CAN_USE_ENCRYPTION=true',
-)
-assert(
-	!canBindTee || ETH_PRIVATE_KEY,
-	'RECLAIM_ETH_PRIVATE_KEY is required when CAN_BIND_TEE=true',
-)
-const decryptionKey = canUseEncryption
-	? requiredOrganizationPrivateKey()
-	: undefined
-const teePrivateKey = canBindTee
-	? requiredOrganizationPrivateKey()
-	: undefined
+// Optional, only needed if you want to do tee attestation OR decrypt result if you
+// have encryption enabled for your organization
+const ORG_ETH_PRIVATE_KEY = process.env.RECLAIM_ETH_PRIVATE_KEY?.trim()
 
-const reclaim = createReclaim({
-	baseUrl: BUILDER_API_URL,
+const reclaim = ReclaimVerification.create({
 	orgSecret: ORG_SECRET,
+});
+
+const sessions = new Set<string>()
+const results = new Map<string, VerifyResultFullOutcome>()
+
+const logger = pino({
+	redact: ['req.headers.authorization'],
 })
+const app = Fastify({ loggerInstance: logger })
 
-const app = express()
-let onDelivery = (_body: CallbackBody) => {}
-const delivery = new Promise<CallbackBody>((resolve) => {
-	onDelivery = resolve
-})
-
-// A production callback should authenticate by verifying the signed result,
-// persist before acknowledging, deduplicate deliveries, and process them from
-// a durable queue. This demo waits for one signed terminal result in memory.
-app.use(express.json({ limit: '1mb' }))
-app.post(CALLBACK_PATH, (req, res) => {
-	res.sendStatus(202)
-	onDelivery(req.body)
-})
-const server = app.listen(CALLBACK_PORT)
-await once(server, 'listening')
-console.log(`Callback listener ready on http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`)
-
-try {
-	// Builder resolves and pins provider versions at creation. Blank means the
-	// latest active version; exact and npm semver ranges are also supported.
-	const session = await reclaim.sessions.create({
-		providers: PROVIDER_IDS.map((providerId) => ({
-			providerId,
-			...(PROVIDER_VERSION ? { version: PROVIDER_VERSION } : {}),
-		})),
-		context: { orderId: `demo-${Date.now()}` },
-		...(VERIFICATION_CLIENT_URL
-			? { verificationClientUrl: VERIFICATION_CLIENT_URL }
-			: {}),
-		...(teePrivateKey
-			? { teeAttestation: { appSecret: teePrivateKey } }
-			: {}),
-	})
-	const claimantUrl = appendVerificationClientQuery(
-		session.verificationUrl,
-		VERIFICATION_CLIENT_QUERY,
-	)
-	assert(
-		claimantUrl.searchParams.get('api') === '2',
-		'Builder returned a verification URL without api=2',
-	)
-
-	console.log('✓ Builder session created:', session.id, `(${session.mode})`)
-	console.log('  Verification Client:', session.verificationClientId)
-	console.log('  Provider versions:')
-	for(const provider of session.providers) {
-		console.log(`    ${provider.providerId} → ${provider.resolvedVersion}`)
-	}
-	console.log('\nOpen this URL for the claimant:')
-	console.log(`${claimantUrl}\n`)
-	console.log('Waiting for a signed result callback (Ctrl-C to stop)')
-
-	const body = await delivery
-	const outcome = await reclaim.results.receive(body, {
-		credential: decryptionKey,
-		expectedReclaimSessionId: session.id,
-		expectedAud: ORG_ID,
-		...(teePrivateKey
-			? {
-				proofValidation: {
-					requireSessionBinding: true,
-					teeAttestation: { appSecret: teePrivateKey },
+app.post<{ Body: CreateVerificationBody }>('/verifications', {
+	schema: {
+		body: {
+			type: 'object',
+			additionalProperties: false,
+			properties: {
+				context: {
+					type: 'object',
+					additionalProperties: true,
+					maxProperties: 20,
 				},
-			}
+			},
+		},
+	},
+}, async (request, reply) => {
+	const session = await reclaim.sessions.create({
+		providers: providerConfig.providers,
+		context: request.body.context || {},
+		// Portals is the default verification client, you can always change it using verificationClientUrl
+		// or use a custom one.
+		// verificationClientUrl: VerificationClient.custom('http://localhost:4001/verifier-app'),
+		...(ORG_ETH_PRIVATE_KEY
+			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
 			: {}),
 	})
+	sessions.add(session.id)
+	request.log.info(
+		{ reclaimSessionId: session.id },
+		'verification created',
+	)
+	return reply.code(201).send({
+		reclaimSessionId: session.id,
+		verificationUrl: session.verificationUrl,
+	})
+})
 
-	assert(outcome.kind === 'result', `Expected a signed result, got ${outcome.kind}`)
-	console.log('✓ Result envelope and every proof verified')
-	console.log('  Session:', outcome.result.reclaimSessionId)
-	console.log('  Proofs:', outcome.result.proofs?.length ?? 0)
-
-	for(const proof of outcome.result.proofs ?? []) {
-		console.log(
-			`  ${proof.providerId ?? 'unknown provider'} / `
-				+ `${proof.requestId ?? 'unknown request'}: verified by `
-				+ `${proof.attestorAddress ?? 'unknown attestor'}`,
-		)
-		// `proof.data` is the trusted result returned by verifyProof. This demo
-		// shows it for clarity; avoid logging personal data in production.
-		console.log('    trusted data:', JSON.stringify(proof.data ?? {}, null, 2))
+app.post<{ Body: VerificationResultDelivery }>('/callbacks/reclaim', {
+	schema: {
+		body: {
+			type: 'object',
+			additionalProperties: false,
+			required: ['sessionId', 'event', 'timestamp', 'data'],
+			properties: {
+				sessionId: { type: 'string', format: 'uuid' },
+				event: { type: 'string' },
+				timestamp: { type: 'string', format: 'date-time' },
+				data: { type: 'string', maxLength: 5_000_000 },
+			},
+		},
+	},
+}, async (request, reply) => {
+	const { sessionId } = request.body
+	if (!sessions.has(sessionId)) {
+		return reply.code(404).send({ error: 'Unknown verification session' })
 	}
 
-	console.log('\nBuilder event log:')
-	for(const event of await reclaim.sessions.listEvents(session.id)) {
-		console.log(`  ${event.createdAt}  ${event.event}`)
-	}
-} catch(error) {
-	if(error instanceof ResultVerificationError) {
-		console.error('✗ Result verification failed:', error.reason)
-		process.exitCode = 1
-	} else {
-		throw error
-	}
-} finally {
-	await closeServer()
+	const delivery = await reclaim.results.receive(request.body, {
+		expectedAud: ORG_ID,
+		reclaimSessionId: sessionId,
+		...(ORG_ETH_PRIVATE_KEY
+			? { orgEthPrivateKey: ORG_ETH_PRIVATE_KEY }
+			: {}),
+	})
+	assert(delivery.kind === 'result', 'Expected a signed terminal result')
+	results.set(sessionId, delivery.result)
+	request.log.info(
+		{ reclaimSessionId: sessionId },
+		'verification result accepted',
+	)
+	return reply.code(204).send()
+})
+
+app.get<{ Params: { reclaimSessionId: string } }>(
+	'/verifications/:reclaimSessionId',
+	async (request, reply) => {
+		const { reclaimSessionId } = request.params
+		if (!sessions.has(reclaimSessionId)) {
+			return reply.code(404).send({ error: 'Verification session not found' })
+		}
+		const result = results.get(reclaimSessionId)
+		if (!result) {
+			return {
+				reclaimSessionId,
+				status: 'pending',
+			}
+		}
+		return {
+			reclaimSessionId,
+			status: 'complete',
+			result,
+		}
+	},
+)
+
+await app.listen({ host: '0.0.0.0', port: PORT })
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+	process.once(signal, () => void shutdown(signal))
+}
+
+interface CreateVerificationBody {
+	context?: Record<string, unknown>
 }
 
 function requiredEnv(name: string) {
 	const value = process.env[name]?.trim()
-	assert(value, `${name} is required; copy .env.example to .env and set it`)
+	assert(value, `${name} is required`)
 	return value
 }
 
-function requiredOrganizationPrivateKey() {
-	assert(
-		ETH_PRIVATE_KEY,
-		'RECLAIM_ETH_PRIVATE_KEY is required for the selected private-key feature',
-	)
-	return ETH_PRIVATE_KEY
-}
-
-function appendVerificationClientQuery(url: string, query?: string) {
-	const result = new URL(url)
-	if(!query) {
-		return result
-	}
-
-	for(const [key, value] of new URLSearchParams(query)) {
-		assert(
-			key !== 'api' && key !== 'sessionId',
-			`VERIFICATION_CLIENT_QUERY cannot replace Builder-owned ${key}`,
-		)
-		result.searchParams.set(key, value)
-	}
-	return result
-}
-
-function callbackPath(callbackUrl?: string) {
-	if(!callbackUrl) {
-		return '/callback'
-	}
-
-	const url = new URL(callbackUrl)
-	assert(url.pathname.startsWith('/'), 'CALLBACK_URL must contain an absolute path')
-	return url.pathname
-}
-
-async function closeServer() {
-	if(!server.listening) {
-		return
-	}
-
-	await new Promise<void>((resolve, reject) => {
-		server.close((error) => error ? reject(error) : resolve())
-	})
+async function shutdown(signal: string) {
+	logger.info({ signal }, 'server stopping')
+	await app.close()
 }
