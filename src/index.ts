@@ -46,7 +46,10 @@ const reclaim = ReclaimVerification.create({
 const LAUNCH_CLIENTS: Record<string, string> = {
 	'builder': `${BUILDER_BASE_URL}/v/{sessionId}`,
 	'portals': `${BUILDER_BASE_URL}/portals`,
-	'verifier-app': `${BUILDER_BASE_URL}/verifier-app`,
+	// Builder's own share page, `GET /s` — a real openable URL, so the
+	// returned `verificationUrl` doubles as the share link (QR, clipboard,
+	// SMS). The other three below are attribution-only labels.
+	'verifier-app': `${BUILDER_BASE_URL}/s`,
 	'reclaim-browser-extension': `${BUILDER_BASE_URL}/reclaim-browser-extension`,
 }
 

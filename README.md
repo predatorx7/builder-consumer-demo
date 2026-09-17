@@ -17,12 +17,11 @@ Both halves of a Builder integration:
    app deep link, App Clip, or QR.
 4. Wait for the server to relay the result.
 
-## The browser half needs the launcher
+## The browser half
 
-`public/app.js` imports `@reclaimprotocol/client/launch`, which is planned but
-not built yet — see `../plans/client-launch-api.md`. The server runs today and
-`/` loads, but `/vendor/launch.js` answers 501 and the buttons fail until that
-subpath ships. Everything else in this README works now.
+`public/app.js` imports `@reclaimprotocol/client/launch`. The server serves that
+build straight out of the installed SDK at `/vendor/launch.js`, so the page
+needs no bundler; a real app imports the subpath and lets its bundler do it.
 
 ## The server picks the client, the page picks the mechanism
 
@@ -122,6 +121,12 @@ curl -X POST http://localhost:3000/verifications \
 
 `client` is one of `builder`, `portals`, `verifier-app`, or
 `reclaim-browser-extension`, and defaults to `builder`.
+
+A `verifier-app` session is bound to Builder's share page, `GET /s`, so the
+`verificationUrl` it returns is the share link itself — the same string works
+in a QR code, on the clipboard, or in an SMS. The other three are
+attribution-only labels that Builder serves nothing at; the launcher rebuilds
+the real destination for those from its own options.
 
 Open the returned `verificationUrl`. Save its `reclaimSessionId`. After the
 callback arrives, read the verified result and proof data:
