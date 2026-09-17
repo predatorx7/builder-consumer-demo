@@ -122,11 +122,11 @@ curl -X POST http://localhost:3000/verifications \
 `client` is one of `builder`, `portals`, `verifier-app`, or
 `reclaim-browser-extension`, and defaults to `builder`.
 
-A `verifier-app` session is bound to Builder's share page, `GET /s`, so the
-`verificationUrl` it returns is the share link itself — the same string works
-in a QR code, on the clipboard, or in an SMS. The other three are
-attribution-only labels that Builder serves nothing at; the launcher rebuilds
-the real destination for those from its own options.
+All four are bound to one of Builder's `GET /share/{client}` pages (`builder`
+and `portals` redirect server-side; `verifier-app` and
+`reclaim-browser-extension` serve the launcher), so the `verificationUrl` each
+returns is itself a real, openable share link — the same string works in a QR
+code, on the clipboard, or in an SMS.
 
 Open the returned `verificationUrl`. Save its `reclaimSessionId`. After the
 callback arrives, read the verified result and proof data:

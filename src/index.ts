@@ -43,14 +43,18 @@ const reclaim = ReclaimVerification.create({
  * name any client could still steer a claimant to one this app has never
  * tested against.
  */
+// All four share the uniform `/share/{name}` shape (see Builder's
+// `builtin-clients.ts`'s `clientUrl()` and `SharePage.tsx`) — `builder` and
+// `portals` redirect server-side, `verifier-app` and
+// `reclaim-browser-extension` serve the QR/App-Clip/deep-link/extension-
+// handoff launcher, so every one of these returns a `verificationUrl` that
+// is itself a real, openable share link (QR, clipboard, SMS).
 const LAUNCH_CLIENTS: Record<string, string> = {
-	'builder': `${BUILDER_BASE_URL}/v/{sessionId}`,
-	'portals': `${BUILDER_BASE_URL}/portals`,
-	// Builder's own share page, `GET /s` — a real openable URL, so the
-	// returned `verificationUrl` doubles as the share link (QR, clipboard,
-	// SMS). The other three below are attribution-only labels.
-	'verifier-app': `${BUILDER_BASE_URL}/s`,
-	'reclaim-browser-extension': `${BUILDER_BASE_URL}/reclaim-browser-extension`,
+	'builder': `${BUILDER_BASE_URL}/share/builder`,
+	'portals': `${BUILDER_BASE_URL}/share/portals`,
+	'verifier-app': `${BUILDER_BASE_URL}/share/verifier-app`,
+	'reclaim-browser-extension':
+		`${BUILDER_BASE_URL}/share/reclaim-browser-extension`,
 }
 
 const sessions = new Set<string>()
