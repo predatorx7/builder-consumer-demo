@@ -3,12 +3,13 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Minimal Fastify server that creates Builder verifications and stores verified results.",
+	"description": "Fastify server and browser page showing Builder verification end to end: session creation, launching into each Verification Client, and result relay.",
 	"scripts": {
 		"start": "node --env-file-if-exists=.env --experimental-strip-types src/index.ts",
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@fastify/static": "^8.2.0",
 		"@reclaimprotocol/client": "file:../builder/packages/client",
 		"fastify": "^5.6.0",
 		"pino": "^10.3.0"

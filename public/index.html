@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Builder consumer demo</title>
+<!--
+	No bundler. The import map resolves the launcher to the copy the server
+	exposes at /vendor, so this page loads the same build a bundled app would.
+-->
+<script type="importmap">
+{
+	"imports": {
+		"@reclaimprotocol/client/launch": "/vendor/launch.js"
+	}
+}
+</script>
+<style>
+	:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #d8d8d8; }
+	@media (prefers-color-scheme: dark) {
+		:root { --fg: #eee; --bg: #131313; --muted: #9a9a9a; --line: #333; }
+	}
+	body {
+		margin: 0 auto; padding: 32px 16px; max-width: 46rem;
+		font: 16px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg);
+	}
+	h1 { font-size: 1.4rem; margin: 0 0 4px; }
+	p { color: var(--muted); margin: 0 0 24px; }
+	.row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+	button {
+		font: inherit; padding: 8px 14px; cursor: pointer; border-radius: 6px;
+		border: 1px solid var(--line); background: transparent; color: inherit;
+	}
+	#status { min-height: 1.5em; font-variant-numeric: tabular-nums; }
+	pre {
+		white-space: pre-wrap; word-break: break-word; font-size: 13px;
+		border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+	}
+	pre:empty { display: none; }
+	code { font-size: 0.9em; }
+</style>
+</head>
+<body>
+	<h1>Builder consumer demo</h1>
+	<p>
+		Pick which Verification Client the server should bind the session to.
+		The page doesn't choose — it reads the choice out of the returned
+		<code>verificationUrl</code> and works out how to open it here.
+	</p>
+
+	<div class="row">
+		<button data-client="reclaim-browser-extension">Extension</button>
+		<button data-client="portals">Portal</button>
+		<button data-client="verifier-app">Verifier app</button>
+		<button data-client="builder">Builder page</button>
+	</div>
+
+	<div id="status"></div>
+	<pre id="output"></pre>
+
+	<script type="module" src="/app.js"></script>
+</body>
+</html>
